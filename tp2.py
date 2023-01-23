@@ -280,7 +280,7 @@ def tgcyc(nsegment, b, engine=JOR, n1=5, n2=5):
     
     return uh
 
-def mgcyc(lmax, l, gamma, nsegment, u0, b, engine=JOR, n1=5, n2=5):
+def mgcyc(l, gamma, nsegment, u0, b, engine=JOR, n1=5, n2=5):
     """ 
     Multi grid cycle:
         - nsegment: the number of segment so that h = 1.0/nsegment
@@ -322,53 +322,52 @@ def mgcyc(lmax, l, gamma, nsegment, u0, b, engine=JOR, n1=5, n2=5):
     # Init
     uh = np.zeros(xih.shape)
     
-    for i in range(gamma):
-        if(i==0):
-            # Initial guess
-            if(u0 is None):
-                u0 = 0.5 * (np.sin(16. * xih * pi) + np.sin(40. * xih * pi))
-                # plot(xih, u0,'-x', label="Initial guess")
-        else:
-            u0 = uh
+    if(u0 is None):
+        u0 = 0.5 * (np.sin(16. * xih * pi) + np.sin(40. * xih * pi))
+        # plot(xih, u0,'-x', label="Initial guess")
+         
+    # Pre-smoothing Relaxation
+    uh, dh, _ = engine(Ah, b, u0, omega=0.5, eps=_eps, maxiter=n1)
+
+    # Restriction with injection
+    dH = np.zeros(len(dh))
+    dH = injection(dh)
         
-        # Pre-smoothing Relaxation
-        uh, dh, _ = engine(Ah, b, u0, omega=0.5, eps=_eps, maxiter=n1)
-    
-        # Restriction with injection
-        dH = np.zeros(len(dh))
-        dH = injection(dh)
+    # Solve
+    vH = np.zeros(dH.shape)
+    if(l==1):
+        vH = np.dot(np.linalg.inv(AH),dH)
+    else:
+        for j in range(gamma):
+            vH = mgcyc(l-1, gamma, nsegment=n_inc_H+1, u0=vH, b=dH, engine=JOR, n1=n1, n2=n2)
             
-        # Solve
-        vH = np.zeros(dH.shape)
-        if(l==1):
-            vH = np.dot(np.linalg.inv(AH),dH)
-        else:
-            for j in range(gamma):
-                vH = mgcyc(lmax, l-1, gamma, nsegment=n_inc_H+1, u0=vH, b=dH, engine=JOR, n1=n1, n2=n2)
-                
-        # Prolongation
-        vh = np.zeros(uh.shape)
-        vh = interpolation(vH,vh)
-            
-        # Update solution
-        uh += vh
-            
-        # Post-smoothing Relaxation
-        uh, dh, _ = JOR(Ah, b, x0=uh, omega=0.5, eps=_eps, maxiter=n2)
-    
-        if(l==lmax):
-            label = "$\gamma = $" + str(i)
-            plot(xih, uh,'-x', label=label)
-            title = str(l) + " levels multigrid method"
-            plt.title(title)
-            
-        plt.show()
-    
-    if(l==lmax):
-        end = time.time()
-        print('\nMultigrid cycle took {:.2f}s to compute.'.format(end - start))
+    # Prolongation
+    vh = np.zeros(uh.shape)
+    vh = interpolation(vH,vh)
+        
+    # Update solution
+    uh += vh
+        
+    # Post-smoothing Relaxation
+    uh, dh, _ = JOR(Ah, b, x0=uh, omega=0.5, eps=_eps, maxiter=n2)
+
+    label = "$(\gamma, l) = ($" + str(gamma) + "," + str(l) + ")"
+    plot(xih, uh,'-x', label=label)
+    # title = str(l) + " levels multigrid method"
+    # plt.title(title)
+        
+    plt.show()
     
     return uh
+
+def time_mgcyc(l, gamma, nsegment, u0, b):
+    start = time.time()
+    
+    mgcyc(l, gamma, nsegment, u0, b)
+    
+    end = time.time()
+    print('\nMultigrid cycle took {:.2f}s to compute.'.format(end - start))
+    
     
 tgcyc(nsegment=64, b=None)
-mgcyc(lmax=2, l=2, gamma=2, nsegment=64, u0=None, b=None)
+time_mgcyc(l=3, gamma=1, nsegment=64, u0=None, b=None)
