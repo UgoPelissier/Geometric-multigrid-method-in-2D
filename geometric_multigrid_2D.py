@@ -182,7 +182,7 @@ def SOR(A, b, x0=None, omega=1.5, eps=_eps, maxiter=_maxiter):
 
 def injection(fine,nh,nH,option):
     """ 
-    Classical injection, that only keep the value of the coarse nodes 
+    3 options of injection: classical, half-weighting and full-weighting
     """
     fine = fine.reshape((nh,nh))
     coarse = np.zeros((nH,nH))
@@ -240,20 +240,35 @@ def interpolation(coarse,n_inc_H,fine,n_inc_h):
     
     k=0
     l=0
-    for i in range(0,(n_inc_h+2),2):
-        for j in range(0,(n_inc_h+2),2):
-            fine_boundary[i,j] = coarse_boundary[k,l]
-            l+=1
-        k+=1
-        l=0
-        
     for i in range(0,(n_inc_h),2):
         for j in range(0,(n_inc_h),2):
+            
+            # Known values of the fine grid
+            if(i==0 or j==0):
+                if(i==0 and j==0):
+                    fine_boundary[i,j] = coarse_boundary[k,l]
+                    fine_boundary[i,j+2] = coarse_boundary[k,l+1]
+                    fine_boundary[i+2,j] = coarse_boundary[k+1,l]
+                    fine_boundary[i+2,j+2] = coarse_boundary[k+1,l+1]
+                elif(i==0 and j!=0):
+                    fine_boundary[i,j+2] = coarse_boundary[k,l+1]
+                    fine_boundary[i+2,j+2] = coarse_boundary[k+1,l+1]
+                elif(i!=0 and j==0):
+                    fine_boundary[i+2,j] = coarse_boundary[k+1,l]
+                    fine_boundary[i+2,j+2] = coarse_boundary[k+1,l+1]
+            else:
+                fine_boundary[i+2,j+2] = coarse_boundary[k+1,l+1]
+            l+=1
+            
+            # Interpolation
             fine_boundary[i,j+1] = (fine_boundary[i,j]+fine_boundary[i,j+2])/2
             fine_boundary[i+1,j] = (fine_boundary[i,j]+fine_boundary[i+2,j])/2
             fine_boundary[i+1,j+2] = (fine_boundary[i,j+2]+fine_boundary[i+2,j+2])/2
             fine_boundary[i+2,j+1] = (fine_boundary[i+2,j]+fine_boundary[i+2,j+2])/2
             fine_boundary[i+1,j+1] = (fine_boundary[i,j]+fine_boundary[i+2,j]+fine_boundary[i,j+2]+fine_boundary[i+2,j+2])/4
+            
+        k+=1
+        l=0
     
     fine = fine_boundary[1:n_inc_h+1,1:n_inc_h+1].reshape(n_inc_h*n_inc_h)
     
@@ -331,7 +346,7 @@ def mgcyc(l, gamma, nsegment, u0, b, f, engine=JOR, n1=20, n2=20):
     uh, dh, _ = engine(Ah, b, u0, omega=0.5, eps=_eps, maxiter=n1)
 
     # Restriction with injection
-    dH = injection(dh,n_inc_h,n_inc_H,option="full-weighting")
+    dH = injection(dh,n_inc_h,n_inc_H,option=None)
         
     # Solve
     vH = np.zeros(dH.shape)
