@@ -271,7 +271,7 @@ def tgcyc(nsegment, b, engine=JOR, n1=5, n2=5):
     uh, dh, _ = engine(Ah, b, u0, omega=0.5, eps=_eps, maxiter=n1+3)
         
     # Post-smoothing Relaxation
-    uh, dh, _ = JOR(Ah, b, x0=uh, omega=0.5, eps=_eps, maxiter=n2)
+    uh, dh, _ = engine(Ah, b, x0=uh, omega=0.5, eps=_eps, maxiter=n2)
     
     # plot(xih, uh,'-x', label="3 iterations of smoothing")
     
@@ -349,7 +349,7 @@ def mgcyc(l, gamma, nsegment, u0, b, engine=JOR, n1=5, n2=5):
     uh += vh
         
     # Post-smoothing Relaxation
-    uh, dh, _ = JOR(Ah, b, x0=uh, omega=0.5, eps=_eps, maxiter=n2)
+    uh, dh, _ = engine(Ah, b, x0=uh, omega=0.5, eps=_eps, maxiter=n2)
 
     label = "$(\gamma, l) = ($" + str(gamma) + "," + str(l) + ")"
     plot(xih, uh,'-x', label=label)
@@ -370,4 +370,4 @@ def time_mgcyc(l, gamma, nsegment, u0, b):
     
     
 tgcyc(nsegment=64, b=None)
-time_mgcyc(l=3, gamma=1, nsegment=64, u0=None, b=None)
+time_mgcyc(l=1, gamma=1, nsegment=64, u0=None, b=None)

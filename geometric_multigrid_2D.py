@@ -84,6 +84,14 @@ def laplace(n,sigma,h):
             
     return A
 
+def f(xih,yih):
+    b = np.zeros((xih.shape[0],yih.shape[0]))
+    b[len(xih)//4,len(xih)//4] = 10000
+    b[len(xih)//4,3*len(xih)//4] = 10000
+    b[3*len(xih)//4,len(xih)//4] = 10000
+    b[3*len(xih)//4,3*len(xih)//4] = 10000
+    return b
+
 def plot_laplace(n,sigma,h):
     A = laplace(n,sigma,h)
     Ainv=np.linalg.inv(A)   
@@ -131,17 +139,92 @@ def JOR(A, b, x0=None, omega=0.5, eps=_eps, maxiter=_maxiter):
         
     return x, r, residual_history
 
-def injection(fine,nh,nH):
+def SOR(A, b, x0=None, omega=1.5, eps=_eps, maxiter=_maxiter):
+    """
+    Methode itérative stationnaire de sur-relaxation successive
+    (Successive Over Relaxation)
+
+    A = D - E - F avec D diagonale, E (F) tri inf. (sup.) stricte
+    Le préconditionneur est tri. inf. M = (1./omega) * D - E
+
+    * Divergence garantie pour omega <= 0. ou omega >= 2.0
+    * Convergence garantie si A est symétrique définie positive pour
+    0 < omega  < 2.
+    * Convergence garantie si A est à diagonale dominante stricte pour
+    0 < omega  <= 1.
+
+    Output:
+        - x is the solution at convergence or after maxiter iteration
+        - residual_history is the norm of all residuals
+
+    """
+    if (omega > 2.) or (omega < 0.):
+        raise ArithmeticError("SOR will diverge")
+
+    x = _basic_check(A, b, x0)
+    r = 1e3*np.ones(x.shape)
+    residual_history = list()
+    
+    D = (1/omega) * np.diag(A.diagonal())
+    E = - np.tril(A)-np.diag(np.diag(A))
+    M = D-E
+    M_inv = np.linalg.inv(M)
+    
+    i=0
+    while ( (i<maxiter) and (np.linalg.norm(r)>eps) ) :
+        r = b-np.dot(A,x)
+        residual_history.append(np.linalg.norm(r))
+        z = np.dot(M_inv,r)
+        x += z
+        i += 1
+        
+    return x, r, residual_history
+
+def injection(fine,nh,nH,option):
     """ 
     Classical injection, that only keep the value of the coarse nodes 
     """
-    coarse = np.zeros(nH*nH)
-    k = 0
-    for i in range(1,nh,2):
-        for j in range(1,nh,2):
-            coarse[k] = fine[i*nh + j]
-            k += 1
-    return coarse
+    fine = fine.reshape((nh,nh))
+    coarse = np.zeros((nH,nH))
+    
+    if (option is None):
+        k = 0
+        l=0
+        for i in range(1,nh,2):
+            for j in range(1,nh,2):
+                coarse[k,l] = fine[i,j]
+                l+=1
+            k+=1
+            l=0
+    elif (option == "half-weighting"):      
+        M = np.array([
+            [0,1,0],
+            [1,4,1],
+            [0,1,0]])/8
+        k = 0
+        l=0
+        for i in range(1,nh,2):
+            for j in range(1,nh,2):
+                coarse[k,l] = np.sum(M*fine[i-1:i+2,j-1:j+2])
+                l+=1
+            k+=1
+            l=0
+    elif (option == "full-weighting"):
+        M = np.array([
+            [1,2,1],
+            [2,4,2],
+            [1,2,1]])/16
+        k = 0
+        l=0
+        for i in range(1,nh,2):
+            for j in range(1,nh,2):
+                coarse[k,l] = np.sum(M*fine[i-1:i+2,j-1:j+2])
+                l+=1
+            k+=1
+            l=0
+    else:
+        print("Injection option not allowed. Try one of [None, half-weighting, full-weighting]")
+    return coarse.reshape(nH*nH)
 
 def interpolation(coarse,n_inc_H,fine,n_inc_h):
     """ 
@@ -185,7 +268,7 @@ def plot(x,y,z):
     ax.plot_surface(xs, ys, z, cmap='viridis')
     plt.show()
 
-def mgcyc(l, gamma, nsegment, u0, b, f, engine=JOR, n1=5, n2=5):
+def mgcyc(l, gamma, nsegment, u0, b, f, engine=JOR, n1=20, n2=20):
     """ 
     Multi grid cycle:
         - nsegment: the number of segment so that h = 1.0/nsegment
@@ -227,9 +310,10 @@ def mgcyc(l, gamma, nsegment, u0, b, f, engine=JOR, n1=5, n2=5):
     AH = (1./(H*H)) * laplace(n_inc_H,sigma=0,h=H)
     
     # RHS
+    # b = f(xih,yih)
     if(b is None):
         b = np.zeros((xih.shape[0],yih.shape[0]))
-        b = b.reshape(n_inc_h*n_inc_h)
+    b = b.reshape(n_inc_h*n_inc_h)
         
     # Init
     uh = np.zeros((xih.shape[0],yih.shape[0]))
@@ -247,7 +331,7 @@ def mgcyc(l, gamma, nsegment, u0, b, f, engine=JOR, n1=5, n2=5):
     uh, dh, _ = engine(Ah, b, u0, omega=0.5, eps=_eps, maxiter=n1)
 
     # Restriction with injection
-    dH = injection(dh,n_inc_h,n_inc_H)
+    dH = injection(dh,n_inc_h,n_inc_H,option="full-weighting")
         
     # Solve
     vH = np.zeros(dH.shape)
@@ -265,7 +349,7 @@ def mgcyc(l, gamma, nsegment, u0, b, f, engine=JOR, n1=5, n2=5):
     uh += vh
         
     # Post-smoothing Relaxation
-    uh, dh, _ = JOR(Ah, b, x0=uh, omega=0.5, eps=_eps, maxiter=n2)
+    uh, dh, _ = engine(Ah, b, x0=uh, omega=0.5, eps=_eps, maxiter=n2)
 
     label = "$(\gamma, l) = ($" + str(gamma) + "," + str(l) + ")"
     
@@ -284,4 +368,4 @@ def time_mgcyc(l, gamma, nsegment, u0, b, f):
 
 # plot_laplace(n=10,sigma=0,h=0)
     
-time_mgcyc(l=1, gamma=1, nsegment=64, u0=None, b=None, f=None)
+time_mgcyc(l=1, gamma=1, nsegment=64, u0=None, b=None, f=f)
