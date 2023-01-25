@@ -324,7 +324,7 @@ def mgcyc(l, gamma, nsegment, u0, b, engine=JOR, n1=5, n2=5):
     
     if(u0 is None):
         u0 = 0.5 * (np.sin(16. * xih * pi) + np.sin(40. * xih * pi))
-        # plot(xih, u0,'-x', label="Initial guess")
+        plot(xih, u0,'-x', label="Initial guess")
          
     # Pre-smoothing Relaxation
     uh, dh, _ = engine(Ah, b, u0, omega=0.5, eps=_eps, maxiter=n1)

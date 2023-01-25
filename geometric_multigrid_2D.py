@@ -12,6 +12,7 @@ import scipy as sp
 import scipy.sparse as spa
 import scipy.linalg as la
 import time
+from mpl_toolkits import mplot3d
 
 # Some paramters
 _eps =1e-12
@@ -36,7 +37,7 @@ def discrete_grid():
     plt.ylabel('y')
     plt.gca().set_aspect('equal', adjustable='box')
     plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-    plt.title(r'Discrete Grid $\Omega_h,$ h= %s'%(h),fontsize=24,y=1.08)
+    plt.title('Discrete Grid $\Omega_h$')
     plt.show()
 
 def _basic_check(A, b, x0):
@@ -136,31 +137,55 @@ def injection(fine,nh,nH):
     """
     coarse = np.zeros(nH*nH)
     k = 0
-    for i in range(0,nH):
-        for j in range(0,nH):
-            coarse[k] = fine[(2*i+1)*nh + (2*j+1)]
+    for i in range(1,nh,2):
+        for j in range(1,nh,2):
+            coarse[k] = fine[i*nh + j]
             k += 1
     return coarse
 
-def interpolation(coarse, fine):
+def interpolation(coarse,n_inc_H,fine,n_inc_h):
     """ 
     Classical linear interpolation
     """
-    fine[0] = coarse[0]/2
-    fine[len(fine)-1] = coarse[len(coarse)-1]/2
     
-    i = 1
-    j = 0
-    while ( (i<len(fine)-1) and (j<len(coarse-1)) ):
-        if(i%2==0):
-            fine[i] = (coarse[j] + coarse[j+1]) / 2
-            j += 1
-        else:
-            fine[i] = coarse[j]
-        i += 1
+    coarse_boundary = np.zeros((n_inc_H+2)**2)
+    for i in range(1,n_inc_H+1):
+        coarse_boundary[i*(n_inc_H+2)+1:i*(n_inc_H+2)+1+n_inc_H] = coarse[(i-1)*n_inc_H:i*n_inc_H]
+    coarse_boundary = coarse_boundary.reshape((n_inc_H+2),(n_inc_H+2))
+    
+    fine_boundary = np.zeros(((n_inc_h+2),(n_inc_h+2)))
+    
+    k=0
+    l=0
+    for i in range(0,(n_inc_h+2),2):
+        for j in range(0,(n_inc_h+2),2):
+            fine_boundary[i,j] = coarse_boundary[k,l]
+            l+=1
+        k+=1
+        l=0
+        
+    for i in range(0,(n_inc_h),2):
+        for j in range(0,(n_inc_h),2):
+            fine_boundary[i,j+1] = (fine_boundary[i,j]+fine_boundary[i,j+2])/2
+            fine_boundary[i+1,j] = (fine_boundary[i,j]+fine_boundary[i+2,j])/2
+            fine_boundary[i+1,j+2] = (fine_boundary[i,j+2]+fine_boundary[i+2,j+2])/2
+            fine_boundary[i+2,j+1] = (fine_boundary[i+2,j]+fine_boundary[i+2,j+2])/2
+            fine_boundary[i+1,j+1] = (fine_boundary[i,j]+fine_boundary[i+2,j]+fine_boundary[i,j+2]+fine_boundary[i+2,j+2])/4
+    
+    fine = fine_boundary[1:n_inc_h+1,1:n_inc_h+1].reshape(n_inc_h*n_inc_h)
+    
     return fine
 
-def mgcyc(l, gamma, nsegment, u0, b, engine=JOR, n1=5, n2=5):
+def plot(x,y,z):
+    if not (z.shape == (x.shape[0],y.shape[0])):
+        z = z.reshape(x.shape[0],y.shape[0])
+    xs, ys = np.meshgrid(x, y)
+    fig = plt.figure()
+    ax = plt.axes(projection='3d')    
+    ax.plot_surface(xs, ys, z, cmap='viridis')
+    plt.show()
+
+def mgcyc(l, gamma, nsegment, u0, b, f, engine=JOR, n1=5, n2=5):
     """ 
     Multi grid cycle:
         - nsegment: the number of segment so that h = 1.0/nsegment
@@ -214,8 +239,9 @@ def mgcyc(l, gamma, nsegment, u0, b, engine=JOR, n1=5, n2=5):
         u0 = np.zeros((xih.shape[0],yih.shape[0]))
         for i in range(len(xih)):
             for j in range(len(yih)):
-                u0[i,j] = 0.5 * (np.sin(16. * xih[i] * pi) + np.sin(40. * yih[j] * pi))
+                u0[i,j] = 0.5 * (np.sin(5. * xih[i] * pi) * np.sin(5. * yih[j] * pi))
     u0 = u0.reshape(n_inc_h*n_inc_h)
+    plot(xih,yih,u0)
                 
     # Pre-smoothing Relaxation
     uh, dh, _ = engine(Ah, b, u0, omega=0.5, eps=_eps, maxiter=n1)
@@ -229,37 +255,33 @@ def mgcyc(l, gamma, nsegment, u0, b, engine=JOR, n1=5, n2=5):
         vH = np.dot(np.linalg.inv(AH),dH)
     else:
         for j in range(gamma):
-            vH = mgcyc(l-1, gamma, nsegment=n_inc_H+1, u0=vH, b=dH, engine=JOR, n1=n1, n2=n2)
+            vH = mgcyc(l-1, gamma, nsegment=n_inc_H+1, u0=vH, b=dH, f=None, engine=JOR, n1=n1, n2=n2)
             
     # Prolongation
     vh = np.zeros(uh.shape)
-    # vh = interpolation(vH,vh)
+    vh = interpolation(vH,n_inc_H,vh,n_inc_h)
         
-    # # Update solution
-    # uh += vh
+    # Update solution
+    uh += vh
         
-    # # Post-smoothing Relaxation
-    # uh, dh, _ = JOR(Ah, b, x0=uh, omega=0.5, eps=_eps, maxiter=n2)
+    # Post-smoothing Relaxation
+    uh, dh, _ = JOR(Ah, b, x0=uh, omega=0.5, eps=_eps, maxiter=n2)
 
-    # label = "$(\gamma, l) = ($" + str(gamma) + "," + str(l) + ")"
-    # plot(xih, uh,'-x', label=label)
-    # # title = str(l) + " levels multigrid method"
-    # # plt.title(title)
-        
-    # plt.show()
+    label = "$(\gamma, l) = ($" + str(gamma) + "," + str(l) + ")"
     
-    return uh
+    return xih, yih, uh
 
-def time_mgcyc(l, gamma, nsegment, u0, b):
+def time_mgcyc(l, gamma, nsegment, u0, b, f):
     start = time.time()
     
-    mgcyc(l, gamma, nsegment, u0, b)
+    xih, yih, uh = mgcyc(l, gamma, nsegment, u0, b, f)
+    plot(xih,yih,uh)
     
     end = time.time()
     print('\nMultigrid cycle took {:.2f}s to compute.'.format(end - start))
     
-discrete_grid()    
+# discrete_grid()    
 
-plot_laplace(n=10,sigma=0,h=0)
+# plot_laplace(n=10,sigma=0,h=0)
     
-time_mgcyc(1, 1, nsegment=6, u0=None, b=None)
+time_mgcyc(l=1, gamma=1, nsegment=64, u0=None, b=None, f=None)
