@@ -2,9 +2,12 @@
 """
 Created on Mon Jan 23 22:44:53 2023
 
-@author: ugo.pelissier
+@author: meryame.boudhar & ugo.pelissier
 """
 
+#-----------------------------------------------------------------------------#
+# IMPORT DEPENDENCIES
+#-----------------------------------------------------------------------------#
 from math import pi, sin, cos
 import pylab as plt
 import numpy as np
@@ -12,11 +15,11 @@ import scipy as sp
 import scipy.sparse as spa
 import scipy.linalg as la
 import time
+from mpl_toolkits import mplot3d
 
-# Some paramters
-_eps =1e-12
-_maxiter=500
-
+#-----------------------------------------------------------------------------#
+# FUNCTIONS
+#-----------------------------------------------------------------------------#
 def discrete_grid():
     N=10
     h=1/N
@@ -36,7 +39,7 @@ def discrete_grid():
     plt.ylabel('y')
     plt.gca().set_aspect('equal', adjustable='box')
     plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-    plt.title(r'Discrete Grid $\Omega_h,$ h= %s'%(h),fontsize=24,y=1.08)
+    plt.title('Discrete Grid $\Omega_h$')
     plt.show()
 
 def _basic_check(A, b, x0):
@@ -52,23 +55,23 @@ def _basic_check(A, b, x0):
         raise ValueError("Bad initial value size")
     return x0
 
-def laplace(n,sigma,h):
-    """ Construct the 2D laplace operator """
+def laplace(n,sigma,h,epsilon):
+    """ Construct the anisotropic 2D laplace operator """
     A=np.zeros((n*n,n*n))
     
     # DIAGONAL            
     for i in range (0,n):
         for j in range (0,n):           
-            A[i+n*j,i+n*j]=4+sigma*h*h
+            A[i+n*j,i+n*j]=2*(1+epsilon)+sigma*h*h
     
     # LOWER DIAGONAL        
     for i in range (1,n):
         for j in range (0,n):           
-            A[i+n*j,i+n*j-1]=-1   
+            A[i+n*j,i+n*j-1]=-epsilon   
     # UPPPER DIAGONAL        
     for i in range (0,n-1):
         for j in range (0,n):           
-            A[i+n*j,i+n*j+1]=-1   
+            A[i+n*j,i+n*j+1]=-epsilon  
     
     # LOWER IDENTITY MATRIX
     for i in range (0,n):
@@ -83,8 +86,19 @@ def laplace(n,sigma,h):
             
     return A
 
-def plot_laplace(n,sigma,h):
-    A = laplace(n,sigma,h)
+def f(xih,yih):
+    """ Construct the RHS """
+    b = np.zeros((xih.shape[0],yih.shape[0]))
+    value = 1e5
+    b[len(xih)//4,len(xih)//4] = value
+    b[len(xih)//4,3*len(xih)//4] = value
+    b[3*len(xih)//4,len(xih)//4] = value
+    b[3*len(xih)//4,3*len(xih)//4] = value
+    return b
+
+def plot_laplace(n,sigma,h,epsilon):
+    """ Plot the laplace matrix coefficients for clarity """
+    A = laplace(n,sigma,h,epsilon)
     Ainv=np.linalg.inv(A)   
     fig = plt.figure(figsize=(12,4));
     plt.subplot(121)
@@ -101,7 +115,7 @@ def plot_laplace(n,sigma,h):
     fig.tight_layout()
     plt.show()
 
-def JOR(A, b, x0=None, omega=0.5, eps=_eps, maxiter=_maxiter):
+def JOR(A, b, x0, omega, eps, maxiter):
     """
     Methode itérative stationnaire de sur-relaxation (Jacobi over relaxation)
     Convergence garantie si A est à diagonale dominante stricte
@@ -130,47 +144,159 @@ def JOR(A, b, x0=None, omega=0.5, eps=_eps, maxiter=_maxiter):
         
     return x, r, residual_history
 
-def injection(fine,nh,nH):
-    """ 
-    Classical injection, that only keep the value of the coarse nodes 
+def SOR(A, b, x0, omega, eps, maxiter):
     """
-    coarse = np.zeros(nH*nH)
-    k = 0
-    for i in range(0,nH):
-        for j in range(0,nH):
-            coarse[k] = fine[(2*i+1)*nh + (2*j+1)]
-            k += 1
-    return coarse
+    Methode itérative stationnaire de sur-relaxation successive
+    (Successive Over Relaxation)
 
-def interpolation(coarse, fine):
-    """ 
-    Classical linear interpolation
+    A = D - E - F avec D diagonale, E (F) tri inf. (sup.) stricte
+    Le préconditionneur est tri. inf. M = (1./omega) * D - E
+
+    * Divergence garantie pour omega <= 0. ou omega >= 2.0
+    * Convergence garantie si A est symétrique définie positive pour
+    0 < omega  < 2.
+    * Convergence garantie si A est à diagonale dominante stricte pour
+    0 < omega  <= 1.
+
+    Output:
+        - x is the solution at convergence or after maxiter iteration
+        - residual_history is the norm of all residuals
+
     """
-    fine[0] = coarse[0]/2
-    fine[len(fine)-1] = coarse[len(coarse)-1]/2
+    if (omega > 2.) or (omega < 0.):
+        raise ArithmeticError("SOR will diverge")
+
+    x = _basic_check(A, b, x0)
+    r = 1e3*np.ones(x.shape)
+    residual_history = list()
     
-    i = 1
-    j = 0
-    while ( (i<len(fine)-1) and (j<len(coarse-1)) ):
-        if(i%2==0):
-            fine[i] = (coarse[j] + coarse[j+1]) / 2
-            j += 1
-        else:
-            fine[i] = coarse[j]
+    D = (1/omega) * np.diag(A.diagonal())
+    E = - np.tril(A)-np.diag(np.diag(A))
+    M = D-E
+    M_inv = np.linalg.inv(M)
+    
+    i=0
+    while ( (i<maxiter) and (np.linalg.norm(r)>eps) ) :
+        r = b-np.dot(A,x)
+        residual_history.append(np.linalg.norm(r))
+        z = np.dot(M_inv,r)
+        x += z
         i += 1
+        
+    return x, r, residual_history
+
+def injection(fine,nh,nH,option):
+    """ 
+    3 options of injection: classical, half-weighting and full-weighting
+    """
+    fine = fine.reshape((nh,nh))
+    coarse = np.zeros((nH,nH))
+    
+    if (option is None):
+        k = 0
+        l=0
+        for i in range(1,nh,2):
+            for j in range(1,nh,2):
+                coarse[k,l] = fine[i,j]
+                l+=1
+            k+=1
+            l=0
+    elif (option == "half-weighting"):      
+        M = np.array([
+            [0,1,0],
+            [1,4,1],
+            [0,1,0]])/8
+        k = 0
+        l=0
+        for i in range(1,nh,2):
+            for j in range(1,nh,2):
+                coarse[k,l] = np.sum(M*fine[i-1:i+2,j-1:j+2])
+                l+=1
+            k+=1
+            l=0
+    elif (option == "full-weighting"):
+        M = np.array([
+            [1,2,1],
+            [2,4,2],
+            [1,2,1]])/16
+        k = 0
+        l=0
+        for i in range(1,nh,2):
+            for j in range(1,nh,2):
+                coarse[k,l] = np.sum(M*fine[i-1:i+2,j-1:j+2])
+                l+=1
+            k+=1
+            l=0
+    else:
+        print("Injection option not allowed. Try one of [None, half-weighting, full-weighting]")
+    return coarse.reshape(nH*nH)
+
+def interpolation(coarse,n_inc_H,fine,n_inc_h):
+    """ Classical multi-linear interpolation """
+    coarse_boundary = np.zeros((n_inc_H+2)**2)
+    for i in range(1,n_inc_H+1):
+        coarse_boundary[i*(n_inc_H+2)+1:i*(n_inc_H+2)+1+n_inc_H] = coarse[(i-1)*n_inc_H:i*n_inc_H]
+    coarse_boundary = coarse_boundary.reshape((n_inc_H+2),(n_inc_H+2))
+    
+    fine_boundary = np.zeros(((n_inc_h+2),(n_inc_h+2)))
+    
+    k=0
+    l=0
+    for i in range(0,(n_inc_h),2):
+        for j in range(0,(n_inc_h),2):
+            
+            # Known values of the fine grid
+            if(i==0 or j==0):
+                if(i==0 and j==0):
+                    fine_boundary[i,j] = coarse_boundary[k,l]
+                    fine_boundary[i,j+2] = coarse_boundary[k,l+1]
+                    fine_boundary[i+2,j] = coarse_boundary[k+1,l]
+                    fine_boundary[i+2,j+2] = coarse_boundary[k+1,l+1]
+                elif(i==0 and j!=0):
+                    fine_boundary[i,j+2] = coarse_boundary[k,l+1]
+                    fine_boundary[i+2,j+2] = coarse_boundary[k+1,l+1]
+                elif(i!=0 and j==0):
+                    fine_boundary[i+2,j] = coarse_boundary[k+1,l]
+                    fine_boundary[i+2,j+2] = coarse_boundary[k+1,l+1]
+            else:
+                fine_boundary[i+2,j+2] = coarse_boundary[k+1,l+1]
+            l+=1
+            
+            # Interpolation
+            fine_boundary[i,j+1] = (fine_boundary[i,j]+fine_boundary[i,j+2])/2
+            fine_boundary[i+1,j] = (fine_boundary[i,j]+fine_boundary[i+2,j])/2
+            fine_boundary[i+1,j+2] = (fine_boundary[i,j+2]+fine_boundary[i+2,j+2])/2
+            fine_boundary[i+2,j+1] = (fine_boundary[i+2,j]+fine_boundary[i+2,j+2])/2
+            fine_boundary[i+1,j+1] = (fine_boundary[i,j]+fine_boundary[i+2,j]+fine_boundary[i,j+2]+fine_boundary[i+2,j+2])/4
+            
+        k+=1
+        l=0
+    
+    fine = fine_boundary[1:n_inc_h+1,1:n_inc_h+1].reshape(n_inc_h*n_inc_h)
+    
     return fine
 
-def mgcyc(l, gamma, nsegment, u0, b, engine=JOR, n1=5, n2=5):
+def plot(x,y,z,title):
+    if not (z.shape == (x.shape[0],y.shape[0])):
+        z = z.reshape(x.shape[0],y.shape[0])
+    xs, ys = np.meshgrid(x, y)
+    
+    fig = plt.figure()
+    ax = plt.axes(projection='3d')    
+    ax.plot_surface(xs, ys, z, cmap='viridis')
+    
+    ax.set_xlabel('$X$')
+    ax.set_ylabel('$Y$')
+    
+    plt.title(r"$\bf{" + title + "}$")
+    plt.show()
+
+def mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega):
     """ 
     Multi grid cycle:
         - nsegment: the number of segment so that h = 1.0/nsegment
-        - engine: the stationary iterative method used for smoothing 
-    
-    Warning: make the good distinction between the number of segments, the 
-    number of nodes and the number of unknowns
+        - engine: the stationary iterative method used for smoothing
     """
-    start = time.time()
-    
     if(nsegment%2): raise ValueError("nsegment must be even")
     
     # Beware that : nsegment
@@ -197,13 +323,14 @@ def mgcyc(l, gamma, nsegment, u0, b, engine=JOR, n1=5, n2=5):
     yih = xh[1:-1]
     yiH = xH[1:-1]
     
-    # construction of Laplace operator 
-    Ah = (1./(h*h)) * laplace(n_inc_h,sigma=0,h=h)
-    AH = (1./(H*H)) * laplace(n_inc_H,sigma=0,h=H)
+    # Construction of Laplace operator
+    Ah = (1./(h*h)) * laplace(n_inc_h,sigma,h,epsilon)
+    AH = (1./(H*H)) * laplace(n_inc_H,sigma,H,epsilon)
     
     # RHS
     if(b is None):
         b = np.zeros((xih.shape[0],yih.shape[0]))
+        # b = f(xih,yih)
         b = b.reshape(n_inc_h*n_inc_h)
         
     # Init
@@ -214,14 +341,15 @@ def mgcyc(l, gamma, nsegment, u0, b, engine=JOR, n1=5, n2=5):
         u0 = np.zeros((xih.shape[0],yih.shape[0]))
         for i in range(len(xih)):
             for j in range(len(yih)):
-                u0[i,j] = 0.5 * (np.sin(16. * xih[i] * pi) + np.sin(40. * yih[j] * pi))
-    u0 = u0.reshape(n_inc_h*n_inc_h)
+                u0[i,j] = 0.5 * (np.sin(5. * xih[i] * pi) * np.sin(5. * yih[j] * pi))
+        u0 = u0.reshape(n_inc_h*n_inc_h)
+        plot(xih,yih,u0,title="Initial")
                 
     # Pre-smoothing Relaxation
-    uh, dh, _ = engine(Ah, b, u0, omega=0.5, eps=_eps, maxiter=n1)
+    uh, dh, _ = engine(Ah, b, u0, omega=omega, eps=eps, maxiter=n1)
 
     # Restriction with injection
-    dH = injection(dh,n_inc_h,n_inc_H)
+    dH = injection(dh,n_inc_h,n_inc_H,option="full-weighting")
         
     # Solve
     vH = np.zeros(dH.shape)
@@ -229,37 +357,61 @@ def mgcyc(l, gamma, nsegment, u0, b, engine=JOR, n1=5, n2=5):
         vH = np.dot(np.linalg.inv(AH),dH)
     else:
         for j in range(gamma):
-            vH = mgcyc(l-1, gamma, nsegment=n_inc_H+1, u0=vH, b=dH, engine=JOR, n1=n1, n2=n2)
+            _, _, vH, _ = mgcyc(l=l-1, gamma=gamma, nsegment=n_inc_H+1, u0=vH, b=dH, f=f, sigma=sigma, epsilon=epsilon, engine=engine, n1=n1, n2=n2, eps=eps, omega=omega)
             
     # Prolongation
     vh = np.zeros(uh.shape)
-    # vh = interpolation(vH,vh)
+    vh = interpolation(vH,n_inc_H,vh,n_inc_h)
         
-    # # Update solution
-    # uh += vh
+    # Update solution
+    uh += vh
         
-    # # Post-smoothing Relaxation
-    # uh, dh, _ = JOR(Ah, b, x0=uh, omega=0.5, eps=_eps, maxiter=n2)
+    # Post-smoothing Relaxation
+    uh, dh, _ = engine(Ah, b, x0=uh, omega=omega, eps=eps, maxiter=n2)
 
-    # label = "$(\gamma, l) = ($" + str(gamma) + "," + str(l) + ")"
-    # plot(xih, uh,'-x', label=label)
-    # # title = str(l) + " levels multigrid method"
-    # # plt.title(title)
-        
-    # plt.show()
+    label = "$(\gamma, l) = ($" + str(gamma) + "," + str(l) + ")"
     
-    return uh
+    return xih, yih, uh, dh
 
-def time_mgcyc(l, gamma, nsegment, u0, b):
+def post_process_mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega):
     start = time.time()
-    
-    mgcyc(l, gamma, nsegment, u0, b)
-    
+    xih, yih, uh, dh = mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
     end = time.time()
+    
+    plot(xih,yih,uh,title="Solution")
+    
+    print('\nResidual - ||r|| = {:.2f}'.format(np.linalg.norm(dh)))
+    
     print('\nMultigrid cycle took {:.2f}s to compute.'.format(end - start))
-    
-discrete_grid()    
 
-plot_laplace(n=10,sigma=0,h=0)
+#-----------------------------------------------------------------------------#
+# PARAMETERS
+#-----------------------------------------------------------------------------#
+# Smoothing solver
+eps =1e-12
+omega_JOR = 0.5
+omega_SOR = 1.5
+
+# Smoothing iterations
+engine=JOR
+omega = omega_JOR
+n1 = 3
+n2 = 3
+
+# PDE
+sigma = 100
+epsilon = 1
+
+# Grid Cycle
+l = 4
+gamma = 1
+nsegment = 64
+u0 = None
+b = None
+
+#-----------------------------------------------------------------------------#
+# COMPUTATION
+#-----------------------------------------------------------------------------#
+# plot_laplace(n=10,sigma=sigma,h=0.1,epsilon=epsilon)   
     
-time_mgcyc(1, 1, nsegment=6, u0=None, b=None)
+post_process_mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
