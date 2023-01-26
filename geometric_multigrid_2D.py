@@ -2,9 +2,12 @@
 """
 Created on Mon Jan 23 22:44:53 2023
 
-@author: ugo.pelissier
+@author: meryame.boudhar & ugo.pelissier
 """
 
+#-----------------------------------------------------------------------------#
+# IMPORT DEPENDENCIES
+#-----------------------------------------------------------------------------#
 from math import pi, sin, cos
 import pylab as plt
 import numpy as np
@@ -14,10 +17,9 @@ import scipy.linalg as la
 import time
 from mpl_toolkits import mplot3d
 
-# Some paramters
-_eps =1e-12
-_maxiter=500
-
+#-----------------------------------------------------------------------------#
+# FUNCTIONS
+#-----------------------------------------------------------------------------#
 def discrete_grid():
     N=10
     h=1/N
@@ -53,23 +55,23 @@ def _basic_check(A, b, x0):
         raise ValueError("Bad initial value size")
     return x0
 
-def laplace(n,sigma,h):
-    """ Construct the 2D laplace operator """
+def laplace(n,sigma,h,epsilon):
+    """ Construct the anisotropic 2D laplace operator """
     A=np.zeros((n*n,n*n))
     
     # DIAGONAL            
     for i in range (0,n):
         for j in range (0,n):           
-            A[i+n*j,i+n*j]=4+sigma*h*h
+            A[i+n*j,i+n*j]=2*(1+epsilon)+sigma*h*h
     
     # LOWER DIAGONAL        
     for i in range (1,n):
         for j in range (0,n):           
-            A[i+n*j,i+n*j-1]=-1   
+            A[i+n*j,i+n*j-1]=-epsilon   
     # UPPPER DIAGONAL        
     for i in range (0,n-1):
         for j in range (0,n):           
-            A[i+n*j,i+n*j+1]=-1   
+            A[i+n*j,i+n*j+1]=-epsilon  
     
     # LOWER IDENTITY MATRIX
     for i in range (0,n):
@@ -85,15 +87,18 @@ def laplace(n,sigma,h):
     return A
 
 def f(xih,yih):
+    """ Construct the RHS """
     b = np.zeros((xih.shape[0],yih.shape[0]))
-    b[len(xih)//4,len(xih)//4] = 10000
-    b[len(xih)//4,3*len(xih)//4] = 10000
-    b[3*len(xih)//4,len(xih)//4] = 10000
-    b[3*len(xih)//4,3*len(xih)//4] = 10000
+    value = 1e5
+    b[len(xih)//4,len(xih)//4] = value
+    b[len(xih)//4,3*len(xih)//4] = value
+    b[3*len(xih)//4,len(xih)//4] = value
+    b[3*len(xih)//4,3*len(xih)//4] = value
     return b
 
-def plot_laplace(n,sigma,h):
-    A = laplace(n,sigma,h)
+def plot_laplace(n,sigma,h,epsilon):
+    """ Plot the laplace matrix coefficients for clarity """
+    A = laplace(n,sigma,h,epsilon)
     Ainv=np.linalg.inv(A)   
     fig = plt.figure(figsize=(12,4));
     plt.subplot(121)
@@ -110,7 +115,7 @@ def plot_laplace(n,sigma,h):
     fig.tight_layout()
     plt.show()
 
-def JOR(A, b, x0=None, omega=0.5, eps=_eps, maxiter=_maxiter):
+def JOR(A, b, x0, omega, eps, maxiter):
     """
     Methode itérative stationnaire de sur-relaxation (Jacobi over relaxation)
     Convergence garantie si A est à diagonale dominante stricte
@@ -139,7 +144,7 @@ def JOR(A, b, x0=None, omega=0.5, eps=_eps, maxiter=_maxiter):
         
     return x, r, residual_history
 
-def SOR(A, b, x0=None, omega=1.5, eps=_eps, maxiter=_maxiter):
+def SOR(A, b, x0, omega, eps, maxiter):
     """
     Methode itérative stationnaire de sur-relaxation successive
     (Successive Over Relaxation)
@@ -227,10 +232,7 @@ def injection(fine,nh,nH,option):
     return coarse.reshape(nH*nH)
 
 def interpolation(coarse,n_inc_H,fine,n_inc_h):
-    """ 
-    Classical linear interpolation
-    """
-    
+    """ Classical multi-linear interpolation """
     coarse_boundary = np.zeros((n_inc_H+2)**2)
     for i in range(1,n_inc_H+1):
         coarse_boundary[i*(n_inc_H+2)+1:i*(n_inc_H+2)+1+n_inc_H] = coarse[(i-1)*n_inc_H:i*n_inc_H]
@@ -274,26 +276,27 @@ def interpolation(coarse,n_inc_H,fine,n_inc_h):
     
     return fine
 
-def plot(x,y,z):
+def plot(x,y,z,title):
     if not (z.shape == (x.shape[0],y.shape[0])):
         z = z.reshape(x.shape[0],y.shape[0])
     xs, ys = np.meshgrid(x, y)
+    
     fig = plt.figure()
     ax = plt.axes(projection='3d')    
     ax.plot_surface(xs, ys, z, cmap='viridis')
+    
+    ax.set_xlabel('$X$')
+    ax.set_ylabel('$Y$')
+    
+    plt.title(r"$\bf{" + title + "}$")
     plt.show()
 
-def mgcyc(l, gamma, nsegment, u0, b, f, engine=JOR, n1=20, n2=20):
+def mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega):
     """ 
     Multi grid cycle:
         - nsegment: the number of segment so that h = 1.0/nsegment
-        - engine: the stationary iterative method used for smoothing 
-    
-    Warning: make the good distinction between the number of segments, the 
-    number of nodes and the number of unknowns
+        - engine: the stationary iterative method used for smoothing
     """
-    start = time.time()
-    
     if(nsegment%2): raise ValueError("nsegment must be even")
     
     # Beware that : nsegment
@@ -320,15 +323,15 @@ def mgcyc(l, gamma, nsegment, u0, b, f, engine=JOR, n1=20, n2=20):
     yih = xh[1:-1]
     yiH = xH[1:-1]
     
-    # construction of Laplace operator 
-    Ah = (1./(h*h)) * laplace(n_inc_h,sigma=0,h=h)
-    AH = (1./(H*H)) * laplace(n_inc_H,sigma=0,h=H)
+    # Construction of Laplace operator
+    Ah = (1./(h*h)) * laplace(n_inc_h,sigma,h,epsilon)
+    AH = (1./(H*H)) * laplace(n_inc_H,sigma,H,epsilon)
     
     # RHS
-    # b = f(xih,yih)
     if(b is None):
         b = np.zeros((xih.shape[0],yih.shape[0]))
-    b = b.reshape(n_inc_h*n_inc_h)
+        # b = f(xih,yih)
+        b = b.reshape(n_inc_h*n_inc_h)
         
     # Init
     uh = np.zeros((xih.shape[0],yih.shape[0]))
@@ -339,14 +342,14 @@ def mgcyc(l, gamma, nsegment, u0, b, f, engine=JOR, n1=20, n2=20):
         for i in range(len(xih)):
             for j in range(len(yih)):
                 u0[i,j] = 0.5 * (np.sin(5. * xih[i] * pi) * np.sin(5. * yih[j] * pi))
-    u0 = u0.reshape(n_inc_h*n_inc_h)
-    plot(xih,yih,u0)
+        u0 = u0.reshape(n_inc_h*n_inc_h)
+        plot(xih,yih,u0,title="Initial")
                 
     # Pre-smoothing Relaxation
-    uh, dh, _ = engine(Ah, b, u0, omega=0.5, eps=_eps, maxiter=n1)
+    uh, dh, _ = engine(Ah, b, u0, omega=omega, eps=eps, maxiter=n1)
 
     # Restriction with injection
-    dH = injection(dh,n_inc_h,n_inc_H,option=None)
+    dH = injection(dh,n_inc_h,n_inc_H,option="full-weighting")
         
     # Solve
     vH = np.zeros(dH.shape)
@@ -354,7 +357,7 @@ def mgcyc(l, gamma, nsegment, u0, b, f, engine=JOR, n1=20, n2=20):
         vH = np.dot(np.linalg.inv(AH),dH)
     else:
         for j in range(gamma):
-            vH = mgcyc(l-1, gamma, nsegment=n_inc_H+1, u0=vH, b=dH, f=None, engine=JOR, n1=n1, n2=n2)
+            _, _, vH, _ = mgcyc(l=l-1, gamma=gamma, nsegment=n_inc_H+1, u0=vH, b=dH, f=f, sigma=sigma, epsilon=epsilon, engine=engine, n1=n1, n2=n2, eps=eps, omega=omega)
             
     # Prolongation
     vh = np.zeros(uh.shape)
@@ -364,23 +367,51 @@ def mgcyc(l, gamma, nsegment, u0, b, f, engine=JOR, n1=20, n2=20):
     uh += vh
         
     # Post-smoothing Relaxation
-    uh, dh, _ = engine(Ah, b, x0=uh, omega=0.5, eps=_eps, maxiter=n2)
+    uh, dh, _ = engine(Ah, b, x0=uh, omega=omega, eps=eps, maxiter=n2)
 
     label = "$(\gamma, l) = ($" + str(gamma) + "," + str(l) + ")"
     
-    return xih, yih, uh
+    return xih, yih, uh, dh
 
-def time_mgcyc(l, gamma, nsegment, u0, b, f):
+def post_process_mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega):
     start = time.time()
-    
-    xih, yih, uh = mgcyc(l, gamma, nsegment, u0, b, f)
-    plot(xih,yih,uh)
-    
+    xih, yih, uh, dh = mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
     end = time.time()
+    
+    plot(xih,yih,uh,title="Solution")
+    
+    print('\nResidual - ||r|| = {:.2f}'.format(np.linalg.norm(dh)))
+    
     print('\nMultigrid cycle took {:.2f}s to compute.'.format(end - start))
-    
-# discrete_grid()    
 
-# plot_laplace(n=10,sigma=0,h=0)
+#-----------------------------------------------------------------------------#
+# PARAMETERS
+#-----------------------------------------------------------------------------#
+# Smoothing solver
+eps =1e-12
+omega_JOR = 0.5
+omega_SOR = 1.5
+
+# Smoothing iterations
+engine=JOR
+omega = omega_JOR
+n1 = 3
+n2 = 3
+
+# PDE
+sigma = 100
+epsilon = 1
+
+# Grid Cycle
+l = 4
+gamma = 1
+nsegment = 64
+u0 = None
+b = None
+
+#-----------------------------------------------------------------------------#
+# COMPUTATION
+#-----------------------------------------------------------------------------#
+# plot_laplace(n=10,sigma=sigma,h=0.1,epsilon=epsilon)   
     
-time_mgcyc(l=1, gamma=1, nsegment=64, u0=None, b=None, f=f)
+post_process_mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
