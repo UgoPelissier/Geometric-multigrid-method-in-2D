@@ -21,25 +21,32 @@ from mpl_toolkits import mplot3d
 # FUNCTIONS
 #-----------------------------------------------------------------------------#
 def discrete_grid():
+    fig, ax = plt.subplots()
+    
     N=10
     h=1/N
+    
     x=np.arange(0,1.0001,h)
     y=np.arange(0,1.0001,h)
-    X, Y = np.meshgrid(x, y)
-    fig = plt.figure()
-    plt.plot(x[1],y[1],'ro',label='Unknown');
-    plt.plot(X,Y,'ro');
-    plt.plot(np.ones(N+1),y,'go',label='Boundary Condition');
-    plt.plot(np.zeros(N+1),y,'go');
-    plt.plot(x,np.zeros(N+1),'go');
-    plt.plot(x, np.ones(N+1),'go');
-    plt.xlim((-0.1,1.1))
-    plt.ylim((-0.1,1.1))
-    plt.xlabel('x')
-    plt.ylabel('y')
-    plt.gca().set_aspect('equal', adjustable='box')
-    plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-    plt.title('Discrete Grid $\Omega_h$')
+    colors = ['k']*len(x)
+    
+    ax.set_xlim((0,1))
+    ax.set_ylim((0,1))
+    ax.set_xticks(x)
+    ax.set_yticks(y)
+    
+    x0,x1 = ax.get_xlim()
+    y0,y1 = ax.get_ylim()
+    ax.set_aspect(abs(x1-x0)/abs(y1-y0))
+    
+    ax.grid(visible=True, which = "both", color='k')
+    for i in range(len(x)):
+        ax.scatter(np.array([x[i]]*len(x)), y, c=colors, marker=".")
+        
+    plt.xlabel("X")
+    plt.ylabel("Y")
+    plt.title(r"$\bf{\Omega_h}$")
+    fig.savefig('discrete_grid.png', dpi=600)
     plt.show()
 
 def _basic_check(A, b, x0):
@@ -86,16 +93,6 @@ def laplace(n,sigma,h,epsilon):
             
     return A
 
-def f(xih,yih):
-    """ Construct the RHS """
-    b = np.zeros((xih.shape[0],yih.shape[0]))
-    value = 1e5
-    b[len(xih)//4,len(xih)//4] = value
-    b[len(xih)//4,3*len(xih)//4] = value
-    b[3*len(xih)//4,len(xih)//4] = value
-    b[3*len(xih)//4,3*len(xih)//4] = value
-    return b
-
 def plot_laplace(n,sigma,h,epsilon):
     """ Plot the laplace matrix coefficients for clarity """
     A = laplace(n,sigma,h,epsilon)
@@ -111,9 +108,17 @@ def plot_laplace(n,sigma,h,epsilon):
     clb=plt.colorbar();
     clb.set_label('Matrix elements values');
     plt.title(r'Matrix $A^{-1}$ ',fontsize=24)
-    
     fig.tight_layout()
+    fig.savefig('laplace_matrix.png', format='png', dpi=900)
     plt.show()
+    
+def initial_guess(xih,yih,n_inc_h):
+    u0 = np.zeros((xih.shape[0],yih.shape[0]))
+    for i in range(len(xih)):
+        for j in range(len(yih)):
+            u0[i,j] = 0.5 * (np.sin(5. * xih[i] * pi) * np.sin(5. * yih[j] * pi))
+    u0 = u0.reshape(n_inc_h*n_inc_h)
+    return u0
 
 def JOR(A, b, x0, omega, eps, maxiter):
     """
@@ -185,14 +190,14 @@ def SOR(A, b, x0, omega, eps, maxiter):
         
     return x, r, residual_history
 
-def injection(fine,nh,nH,option):
+def restriction(fine,nh,nH,option):
     """ 
-    3 options of injection: classical, half-weighting and full-weighting
+    3 options of restriction: injection, half-weighting and full-weighting
     """
     fine = fine.reshape((nh,nh))
     coarse = np.zeros((nH,nH))
     
-    if (option is None):
+    if (option is "injection"):
         k = 0
         l=0
         for i in range(1,nh,2):
@@ -228,7 +233,7 @@ def injection(fine,nh,nH,option):
             k+=1
             l=0
     else:
-        print("Injection option not allowed. Try one of [None, half-weighting, full-weighting]")
+        print("restriction option not allowed. Try one of [injection, half-weighting, full-weighting]")
     return coarse.reshape(nH*nH)
 
 def interpolation(coarse,n_inc_H,fine,n_inc_h):
@@ -290,6 +295,28 @@ def plot(x,y,z,title):
     
     plt.title(r"$\bf{" + title + "}$")
     plt.show()
+    
+def plot_initial_final(x,y,n_segment,uh,title):
+    n_inc_h = nsegment-1
+    u0 = initial_guess(x,y,n_inc_h)
+    u0 = u0.reshape(x.shape[0],y.shape[0])
+    
+    if not (uh.shape == (x.shape[0],y.shape[0])):
+        uh = uh.reshape(x.shape[0],y.shape[0])
+        
+    xs, ys = np.meshgrid(x, y)
+    
+    fig = plt.figure()
+    ax = plt.axes(projection='3d')    
+    ax.plot_surface(xs, ys, u0, alpha=0.25, cmap='viridis')
+    ax.plot_surface(xs, ys, uh, alpha=1, cmap='viridis')
+    
+    ax.set_xlabel('$X$')
+    ax.set_ylabel('$Y$')
+    
+    plt.title(r"$\bf{" + title + "}$")
+    # fig.savefig('myimage.png', format='png', dpi=1200)
+    plt.show()
 
 def mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega):
     """ 
@@ -338,18 +365,14 @@ def mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, ome
     uh = uh.reshape(n_inc_h*n_inc_h)
     
     if(u0 is None):
-        u0 = np.zeros((xih.shape[0],yih.shape[0]))
-        for i in range(len(xih)):
-            for j in range(len(yih)):
-                u0[i,j] = 0.5 * (np.sin(5. * xih[i] * pi) * np.sin(5. * yih[j] * pi))
-        u0 = u0.reshape(n_inc_h*n_inc_h)
-        plot(xih,yih,u0,title="Initial")
+        u0 = initial_guess(xih,yih,n_inc_h)
+        # plot(xih,yih,u0,title="Initial")
                 
     # Pre-smoothing Relaxation
     uh, dh, _ = engine(Ah, b, u0, omega=omega, eps=eps, maxiter=n1)
 
-    # Restriction with injection
-    dH = injection(dh,n_inc_h,n_inc_H,option="full-weighting")
+    # Restriction
+    dH = restriction(dh,n_inc_h,n_inc_H,option="full-weighting")
         
     # Solve
     vH = np.zeros(dH.shape)
@@ -378,11 +401,42 @@ def post_process_mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1,
     xih, yih, uh, dh = mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
     end = time.time()
     
-    plot(xih,yih,uh,title="Solution")
+    # plot(xih,yih,uh,title="Solution")
+    plot_initial_final(xih,yih,nsegment,uh,"Solution")
     
     print('\nResidual - ||r|| = {:.2f}'.format(np.linalg.norm(dh)))
     
     print('\nMultigrid cycle took {:.2f}s to compute.'.format(end - start))
+    
+def v_cycle_res(l, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega):
+    gamma = 1
+    res = []
+    
+    xih, yih, uh, dh = mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
+    res.append(np.linalg.norm(dh))
+    
+    for i in range(20):
+        xih, yih, uh, dh = mgcyc(l, gamma, nsegment, uh, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
+        res.append(np.linalg.norm(dh))
+    return np.array(res)
+    
+def compare_cycles(nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega):
+    parameters = [
+      # [l,gamma]
+        [1,1],
+        [2,1],
+        [3,1],
+        [2,2],
+        [3,2],
+        [4,2],
+        [5,2]
+        ]
+    res = []
+    for param in parameters:
+        l,gamma = param
+        xih, yih, uh, dh = mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
+        res.append(np.linalg.norm(dh))
+    return np.array(res)
 
 #-----------------------------------------------------------------------------#
 # PARAMETERS
@@ -395,15 +449,25 @@ omega_SOR = 1.5
 # Smoothing iterations
 engine=JOR
 omega = omega_JOR
-n1 = 3
-n2 = 3
+n1 = 2
+n2 = 2
 
 # PDE
-sigma = 100
+sigma = 0
 epsilon = 1
 
+def f(xih,yih):
+    """ Construct the RHS """
+    b = np.zeros((xih.shape[0],yih.shape[0]))
+    value = 1e5
+    b[len(xih)//4,len(xih)//4] = value
+    b[len(xih)//4,3*len(xih)//4] = value
+    b[3*len(xih)//4,len(xih)//4] = value
+    b[3*len(xih)//4,3*len(xih)//4] = value
+    return b
+
 # Grid Cycle
-l = 4
+l = 3
 gamma = 1
 nsegment = 64
 u0 = None
@@ -414,4 +478,6 @@ b = None
 #-----------------------------------------------------------------------------#
 # plot_laplace(n=10,sigma=sigma,h=0.1,epsilon=epsilon)   
     
-post_process_mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
+# post_process_mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
+
+res = v_cycle_res(l, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
