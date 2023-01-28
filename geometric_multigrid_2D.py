@@ -236,26 +236,6 @@ def restriction(fine,nh,nH,option):
         print("restriction option not allowed. Try one of [injection, half-weighting, full-weighting]")
     return coarse.reshape(nH*nH)
 
-def semi_x_restriction(fine,nh,nH,option):
-    """ 
-    1 option of semi-x restriction: injection
-    """
-    fine = fine.reshape((nh,nh))
-    coarse = np.zeros((nH,nh))
-    
-    if (option == "injection"):
-        k = 0
-        l=0
-        for i in range(1,nh,2):
-            for j in range(1,nh-1):
-                coarse[k,l] = fine[i,j]
-                l+=1
-            k+=1
-            l=0
-    else:
-        print("restriction option not allowed. Try one of [injection, half-weighting, full-weighting]")
-    return coarse.reshape(nH*nH)
-
 def interpolation(coarse,n_inc_H,fine,n_inc_h):
     """ Classical multi-linear interpolation """
     coarse_boundary = np.zeros((n_inc_H+2)**2)
@@ -579,8 +559,8 @@ def source(xih,yih):
     return b
 
 # Grid Cycle
-l = 3
-gamma = 1
+l = 4
+gamma = 2
 nsegment = 64
 u0 = None
 b = None
