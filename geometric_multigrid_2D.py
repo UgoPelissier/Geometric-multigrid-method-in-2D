@@ -18,7 +18,7 @@ import time
 from mpl_toolkits import mplot3d
 
 #-----------------------------------------------------------------------------#
-# FUNCTIONS
+# MULTI GRID CYCLE
 #-----------------------------------------------------------------------------#
 def discrete_grid():
     fig, ax = plt.subplots()
@@ -197,7 +197,7 @@ def restriction(fine,nh,nH,option):
     fine = fine.reshape((nh,nh))
     coarse = np.zeros((nH,nH))
     
-    if (option is "injection"):
+    if (option == "injection"):
         k = 0
         l=0
         for i in range(1,nh,2):
@@ -229,6 +229,26 @@ def restriction(fine,nh,nH,option):
         for i in range(1,nh,2):
             for j in range(1,nh,2):
                 coarse[k,l] = np.sum(M*fine[i-1:i+2,j-1:j+2])
+                l+=1
+            k+=1
+            l=0
+    else:
+        print("restriction option not allowed. Try one of [injection, half-weighting, full-weighting]")
+    return coarse.reshape(nH*nH)
+
+def semi_x_restriction(fine,nh,nH,option):
+    """ 
+    1 option of semi-x restriction: injection
+    """
+    fine = fine.reshape((nh,nh))
+    coarse = np.zeros((nH,nh))
+    
+    if (option == "injection"):
+        k = 0
+        l=0
+        for i in range(1,nh,2):
+            for j in range(1,nh-1):
+                coarse[k,l] = fine[i,j]
                 l+=1
             k+=1
             l=0
@@ -281,44 +301,7 @@ def interpolation(coarse,n_inc_H,fine,n_inc_h):
     
     return fine
 
-def plot(x,y,z,title):
-    if not (z.shape == (x.shape[0],y.shape[0])):
-        z = z.reshape(x.shape[0],y.shape[0])
-    xs, ys = np.meshgrid(x, y)
-    
-    fig = plt.figure()
-    ax = plt.axes(projection='3d')    
-    ax.plot_surface(xs, ys, z, cmap='viridis')
-    
-    ax.set_xlabel('$X$')
-    ax.set_ylabel('$Y$')
-    
-    plt.title(r"$\bf{" + title + "}$")
-    plt.show()
-    
-def plot_initial_final(x,y,n_segment,uh,title):
-    n_inc_h = nsegment-1
-    u0 = initial_guess(x,y,n_inc_h)
-    u0 = u0.reshape(x.shape[0],y.shape[0])
-    
-    if not (uh.shape == (x.shape[0],y.shape[0])):
-        uh = uh.reshape(x.shape[0],y.shape[0])
-        
-    xs, ys = np.meshgrid(x, y)
-    
-    fig = plt.figure()
-    ax = plt.axes(projection='3d')    
-    ax.plot_surface(xs, ys, u0, alpha=0.25, cmap='viridis')
-    ax.plot_surface(xs, ys, uh, alpha=1, cmap='viridis')
-    
-    ax.set_xlabel('$X$')
-    ax.set_ylabel('$Y$')
-    
-    plt.title(r"$\bf{" + title + "}$")
-    # fig.savefig('myimage.png', format='png', dpi=1200)
-    plt.show()
-
-def mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega):
+def mgcyc(strategy, l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega):
     """ 
     Multi grid cycle:
         - nsegment: the number of segment so that h = 1.0/nsegment
@@ -357,7 +340,7 @@ def mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, ome
     # RHS
     if(b is None):
         b = np.zeros((xih.shape[0],yih.shape[0]))
-        # b = f(xih,yih)
+        b = f(xih,yih)
         b = b.reshape(n_inc_h*n_inc_h)
         
     # Init
@@ -372,7 +355,7 @@ def mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, ome
     uh, dh, _ = engine(Ah, b, u0, omega=omega, eps=eps, maxiter=n1)
 
     # Restriction
-    dH = restriction(dh,n_inc_h,n_inc_H,option="full-weighting")
+    dH = restriction(dh,n_inc_h,n_inc_H,option=strategy)
         
     # Solve
     vH = np.zeros(dH.shape)
@@ -380,7 +363,7 @@ def mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, ome
         vH = np.dot(np.linalg.inv(AH),dH)
     else:
         for j in range(gamma):
-            _, _, vH, _ = mgcyc(l=l-1, gamma=gamma, nsegment=n_inc_H+1, u0=vH, b=dH, f=f, sigma=sigma, epsilon=epsilon, engine=engine, n1=n1, n2=n2, eps=eps, omega=omega)
+            _, _, vH, _ = mgcyc(strategy, l=l-1, gamma=gamma, nsegment=n_inc_H+1, u0=vH, b=dH, f=f, sigma=sigma, epsilon=epsilon, engine=engine, n1=n1, n2=n2, eps=eps, omega=omega)
             
     # Prolongation
     vh = np.zeros(uh.shape)
@@ -395,10 +378,116 @@ def mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, ome
     label = "$(\gamma, l) = ($" + str(gamma) + "," + str(l) + ")"
     
     return xih, yih, uh, dh
+    
+def v_cycle_res(strategy, l, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega):
+    gamma = 1
+    res = []
+    
+    if (type(epsilon)==int):
+        xih, yih, uh, dh = mgcyc(strategy, l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
+        res.append(np.linalg.norm(dh))
+        for i in range(20):
+            xih, yih, uh, dh = mgcyc(strategy, l, gamma, nsegment, uh, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
+            res.append(np.linalg.norm(dh))
+            
+    elif(type(epsilon)==list):
+        for elt in epsilon:
+            temp_res = []
+            xih, yih, uh, dh = mgcyc(strategy, l, gamma, nsegment, u0, b, f, sigma, elt, engine, n1, n2, eps, omega)
+            temp_res.append(np.linalg.norm(dh))
+            for i in range(20):
+                xih, yih, uh, dh = mgcyc(strategy, l, gamma, nsegment, uh, b, f, sigma, elt, engine, n1, n2, eps, omega)
+                temp_res.append(np.linalg.norm(dh))
+            res.append(temp_res)
+            
+    print("\nV-cycle residual done.")
+            
+    return np.array(res)
 
-def post_process_mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega):
+def w_cycle_res(strategy, l, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega):
+    gamma = 2
+    res = []
+    
+    if (type(epsilon)==int):
+        xih, yih, uh, dh = mgcyc(strategy, l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
+        res.append(np.linalg.norm(dh))
+        for i in range(20):
+            xih, yih, uh, dh = mgcyc(strategy, l, gamma, nsegment, uh, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
+            res.append(np.linalg.norm(dh))
+            
+    elif(type(epsilon)==list):
+        for elt in epsilon:
+            temp_res = []
+            xih, yih, uh, dh = mgcyc(strategy, l, gamma, nsegment, u0, b, f, sigma, elt, engine, n1, n2, eps, omega)
+            temp_res.append(np.linalg.norm(dh))
+            for i in range(20):
+                xih, yih, uh, dh = mgcyc(strategy, l, gamma, nsegment, uh, b, f, sigma, elt, engine, n1, n2, eps, omega)
+                temp_res.append(np.linalg.norm(dh))
+            res.append(temp_res)
+            
+    print("\nW-cycle residual done.")
+            
+    return np.array(res)
+
+#-----------------------------------------------------------------------------#
+# POST-PROCESS
+#-----------------------------------------------------------------------------#
+def plot(x,y,z,title):
+    """ 3D plot of field z(x,y) """
+    if not (z.shape == (x.shape[0],y.shape[0])):
+        z = z.reshape(x.shape[0],y.shape[0])
+    xs, ys = np.meshgrid(x, y)
+    
+    fig = plt.figure()
+    ax = plt.axes(projection='3d')    
+    ax.plot_surface(xs, ys, z, cmap='viridis')
+    
+    ax.set_xlabel('$x$')
+    ax.set_ylabel('$y$')
+    ax.set_zlabel('$u(x,y)$')
+    
+    plt.title(r"$\bf{" + title + "}$")
+    # fig.savefig(title+'.png', format='png', dpi=900)
+    plt.show()
+    
+def plot_initial_final(x,y,n_segment,uh,title):
+    """ 3D plot of the initial guess compared to the final solution """
+    n_inc_h = nsegment-1
+    u0 = initial_guess(x,y,n_inc_h)
+    u0 = u0.reshape(x.shape[0],y.shape[0])
+    
+    if not (uh.shape == (x.shape[0],y.shape[0])):
+        uh = uh.reshape(x.shape[0],y.shape[0])
+        
+    xs, ys = np.meshgrid(x, y)
+    
+    fig = plt.figure()
+    ax = plt.axes(projection='3d')    
+    surf_u0 = ax.plot_surface(xs, ys, u0, alpha=0.35, label="Initial guess")
+    surf_uh = ax.plot_surface(xs, ys, uh, alpha=1, label="Final solution")
+    
+    surf_u0._facecolors2d=surf_u0._facecolor3d
+    surf_u0._edgecolors2d=surf_u0._edgecolor3d
+    
+    surf_uh._facecolors2d=surf_uh._facecolor3d
+    surf_uh._edgecolors2d=surf_uh._edgecolor3d
+    
+    ax.legend()
+    
+    ax.set_xlabel('$x$')
+    ax.set_ylabel('$y$')
+    ax.set_zlabel('$u(x,y)$')
+    
+    # plt.title(r"$\bf{" + title + "}$")
+    fig.savefig('initial_final_comp.png', format='png', dpi=900)
+    plt.show()
+
+def post_process_mgcyc(strategy, l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega):
+    """
+    Plot the final solution and the comparison of this latter with the initial guess
+    """
     start = time.time()
-    xih, yih, uh, dh = mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
+    xih, yih, uh, dh = mgcyc(strategy, l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
     end = time.time()
     
     # plot(xih,yih,uh,title="Solution")
@@ -407,36 +496,54 @@ def post_process_mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1,
     print('\nResidual - ||r|| = {:.2f}'.format(np.linalg.norm(dh)))
     
     print('\nMultigrid cycle took {:.2f}s to compute.'.format(end - start))
+
+def plot_res_cycle(res,epsilon):
+    m,n = res.shape
+    it = range(1,n)
+    col = ["blue", "red", "black"]
+    for i in range(m):        
+        plt.plot(it, res[i][0:n-1], 'o', color=col[i])
+        plt.plot(it, res[i][0:n-1], '--', color=col[i], label="$\epsilon$ = {}".format(epsilon[i]))
+        
+    plt.xticks(it)    
+    plt.xlabel("Iterations")
     
-def v_cycle_res(l, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega):
-    gamma = 1
-    res = []
+    plt.yscale("log")
+    plt.ylabel("||r||")
     
-    xih, yih, uh, dh = mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
-    res.append(np.linalg.norm(dh))
+    plt.legend()
+    plt.title("W-cycle convergence")
+    plt.savefig('w_cycle_res.png', format='png', dpi=900)
+    plt.show()
     
-    for i in range(20):
-        xih, yih, uh, dh = mgcyc(l, gamma, nsegment, uh, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
-        res.append(np.linalg.norm(dh))
-    return np.array(res)
+def compare_plot_res_cycle(res_v,res_w,epsilon):
+    m,n = res_v.shape
+    index = [0,2]
+    it = range(1,n)
+    col_v = ["turquoise", "lightseagreen"]
+    j = 0
+    for i in index:        
+        plt.plot(it, res_v[i][0:n-1], 'o', color=col_v[j])
+        plt.plot(it, res_v[i][0:n-1], '--', color=col_v[j], label="V-cycle - l={}".format(epsilon[i]))
+        j += 1
+        
+    col_w = ["chocolate", "saddlebrown"]
+    j = 0
+    for i in index:        
+        plt.plot(it, res_w[i][0:n-1], 'o', color=col_w[j])
+        plt.plot(it, res_w[i][0:n-1], '--', color=col_w[j], label="W-cycle - l= {}".format(epsilon[i]))
+        j += 1
+        
+    plt.xticks(it)    
+    plt.xlabel("Iterations")
     
-def compare_cycles(nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega):
-    parameters = [
-      # [l,gamma]
-        [1,1],
-        [2,1],
-        [3,1],
-        [2,2],
-        [3,2],
-        [4,2],
-        [5,2]
-        ]
-    res = []
-    for param in parameters:
-        l,gamma = param
-        xih, yih, uh, dh = mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
-        res.append(np.linalg.norm(dh))
-    return np.array(res)
+    plt.yscale("log")
+    plt.ylabel("||r||")
+    
+    plt.legend()
+    plt.title("Cycles convergence")
+    plt.savefig('cycle_res_comp.png', format='png', dpi=900)
+    plt.show()
 
 #-----------------------------------------------------------------------------#
 # PARAMETERS
@@ -449,14 +556,19 @@ omega_SOR = 1.5
 # Smoothing iterations
 engine=JOR
 omega = omega_JOR
-n1 = 2
-n2 = 2
+n1 = 5
+n2 = 5
 
 # PDE
 sigma = 0
 epsilon = 1
 
 def f(xih,yih):
+    """ Construct the RHS """
+    b = np.zeros((xih.shape[0],yih.shape[0]))
+    return b
+
+def source(xih,yih):
     """ Construct the RHS """
     b = np.zeros((xih.shape[0],yih.shape[0]))
     value = 1e5
@@ -472,12 +584,14 @@ gamma = 1
 nsegment = 64
 u0 = None
 b = None
+strategy = "injection"
 
 #-----------------------------------------------------------------------------#
 # COMPUTATION
 #-----------------------------------------------------------------------------#
 # plot_laplace(n=10,sigma=sigma,h=0.1,epsilon=epsilon)   
     
-# post_process_mgcyc(l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
+post_process_mgcyc(strategy, l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
 
-res = v_cycle_res(l, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
+# res_v = v_cycle_res(strategy, l, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
+# res_w = w_cycle_res(strategy, l, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
