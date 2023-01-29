@@ -18,7 +18,7 @@ import time
 from mpl_toolkits import mplot3d
 
 #-----------------------------------------------------------------------------#
-# MULTI GRID CYCLE
+# MULTIGRID CYCLE
 #-----------------------------------------------------------------------------#
 def discrete_grid():
     fig, ax = plt.subplots()
@@ -360,6 +360,10 @@ def mgcyc(strategy, l, gamma, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2
     return xih, yih, uh, dh
     
 def v_cycle_res(strategy, l, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega):
+    """ 
+    Run multiple iterations of V-cycle and return an array containing the norm of the residual at each iteration
+    To perform sensitivity study for a parameter, it can be passed as a list (epsilon in this case).
+    """
     gamma = 1
     res = []
     
@@ -385,6 +389,10 @@ def v_cycle_res(strategy, l, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2,
     return np.array(res)
 
 def w_cycle_res(strategy, l, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega):
+    """ 
+    Run multiple iterations of W-cycle and return an array containing the norm of the residual at each iteration
+    To perform sensitivity study for a parameter, it can be passed as a list (epsilon in this case).
+    """
     gamma = 2
     res = []
     
@@ -478,6 +486,9 @@ def post_process_mgcyc(strategy, l, gamma, nsegment, u0, b, f, sigma, epsilon, e
     print('\nMultigrid cycle took {:.2f}s to compute.'.format(end - start))
 
 def plot_res_cycle(res,epsilon):
+    """
+    Plot the norm of the residual as a function of the iteration for various values of one paramater
+    """
     m,n = res.shape
     it = range(1,n)
     col = ["blue", "red", "black"]
@@ -497,6 +508,9 @@ def plot_res_cycle(res,epsilon):
     plt.show()
     
 def compare_plot_res_cycle(res_v,res_w,epsilon):
+    """
+    Plot the norm of the residual as a function of the iteration for various values of one paramater for both V-cycle and W-cycle
+    """
     m,n = res_v.shape
     index = [0,2]
     it = range(1,n)
