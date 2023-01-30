@@ -14,6 +14,8 @@ import numpy as np
 import scipy as sp
 import scipy.sparse as spa
 import scipy.linalg as la
+from scipy import sparse
+import pyamg
 import time
 from mpl_toolkits import mplot3d
 
@@ -589,3 +591,52 @@ post_process_mgcyc(strategy, l, gamma, nsegment, u0, b, f, sigma, epsilon, engin
 
 # res_v = v_cycle_res(strategy, l, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
 # res_w = w_cycle_res(strategy, l, nsegment, u0, b, f, sigma, epsilon, engine, n1, n2, eps, omega)
+
+#-----------------------------------------------------------------------------#
+# Coarsening Strategies
+#-----------------------------------------------------------------------------#
+
+n = 100
+a = laplace(n=n ,sigma=1,h=0.1,epsilon=0.01)
+A =spa.csr_matrix(a)
+ml = pyamg.ruge_stuben_solver(A) # Ruge Stuben 
+#ml = pyamg.smoothed_aggregation_solver(A) # Smooth Aggregation
+#ml = pyamg.aggregation.rootnode_solver(A)
+
+print(ml)
+b = np.random.rand(A.shape[0])                      
+x = ml.solve(b, tol=1e-10)                          
+print("residual: ", np.linalg.norm(b-A*x)) 
+
+
+#-----------------------------------------------------------------------------#
+# Compatible Relaxation
+#-----------------------------------------------------------------------------#
+
+n = 20
+b = laplace(n=n ,sigma=1,h=0.1,epsilon=0.01)
+B =spa.csr_matrix(b)
+
+xx = np.linspace(0,1,n)
+x,y = np.meshgrid(xx,xx)
+V = np.concatenate([[x.ravel()],[y.ravel()]],axis=0).T
+
+splitting = pyamg.classical.cr.CR(B)
+
+C = np.where(splitting == 0)[0]
+F = np.where(splitting == 1)[0]
+
+fig, ax = plt.subplots()
+ax.scatter(V[C, 0], V[C, 1], marker='s', s=18,
+           color=[232.0/255, 74.0/255, 39.0/255], label='C-pts')
+ax.scatter(V[F, 0], V[F, 1], marker='s', s=18,
+           color=[19.0/255, 41.0/255, 75.0/255], label='F-pts')
+plt.legend(bbox_to_anchor=(0,1.02,1,0.2), loc="lower left",
+           borderaxespad=0, ncol=2)
+
+ax.axis('square')
+ax.set_xlabel('$x$')
+ax.set_ylabel('$y$')
+
+
+plt.show()
